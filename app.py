@@ -487,6 +487,7 @@ with st.sidebar:
         "Departamento principal",
         options=["Todos"] + DEPT_LIST,
         index=0,
+        key="sidebar_dept_select",
     )
 
     year_min, year_max = int(df["anio"].min()), int(df["anio"].max())
@@ -496,6 +497,7 @@ with st.sidebar:
         max_value=year_max,
         value=(year_min, year_max),
         step=1,
+        key="sidebar_year_range",
     )
 
     selected_var = st.selectbox(
@@ -503,6 +505,7 @@ with st.sidebar:
         options=list(VAR_LABELS.keys()),
         format_func=lambda x: VAR_LABELS[x],
         index=0,
+        key="sidebar_var_select",
     )
 
     st.markdown("---")
@@ -694,6 +697,7 @@ with tab2:
         options=DEPT_LIST,
         default=["Bogotá D.C.", "Antioquia", "Valle del Cauca"][:3],
         max_selections=4,
+        key="ts_depts_multiselect",
     )
     vars_ts = st.multiselect(
         "Variables del sistema",
@@ -701,8 +705,12 @@ with tab2:
         default=["pib", "ipm", "desempleo"],
         format_func=lambda x: VAR_SHORT[x],
         max_selections=4,
+        key="ts_vars_multiselect",
     )
-    n_fc = st.slider("Horizonte de pronóstico (años)", 1, 5, 3)
+    n_fc = st.slider(
+        "Horizonte de pronóstico (años)", 1, 5, 3,
+        key="ts_forecast_horizon_slider",
+    )
 
     if len(depts_ts) >= 1 and len(vars_ts) >= 2:
         # Construir panel largo → wide para el primer departamento (sistema univariado multi-var)
@@ -753,7 +761,7 @@ with tab2:
             st.markdown("**Tabla de pronósticos**")
             st.dataframe(forecast_df.style.format("{:.2f}"), use_container_width=True)
 
-        with st.expander("📋 Resumen estadístico completo del modelo"):
+        with st.expander("Resumen estadistico completo del modelo"):
             st.text(summary_txt)
     else:
         st.info("Seleccione al menos 1 departamento y 2 variables para estimar el sistema.")
@@ -762,18 +770,19 @@ with tab2:
 # TAB 3 · MACHINE LEARNING
 # -----------------------------------------------------------------------------
 with tab3:
-    st.subheader("Regresión Supervisada Regularizada")
+    st.subheader("Regresion Supervisada Regularizada")
     st.markdown(
         "Modelos: **Ridge**, **Lasso**, **SVR** y **MLPRegressor**. "
-        "Pipeline con `StandardScaler`. Métricas: R² y RMSE."
+        "Pipeline con `StandardScaler`. Metricas: R2 y RMSE."
     )
 
+    # Keys de widgets UNICOS y distintos de las claves de session_state del modelo
     target = st.selectbox(
         "Variable objetivo (y)",
         options=list(VAR_LABELS.keys()),
         format_func=lambda x: VAR_LABELS[x],
-        index=3,  # IPM por defecto
-        key="ml_target",
+        index=3,
+        key="ml_target_select",
     )
     features = [v for v in VAR_LABELS.keys() if v != target]
     selected_features = st.multiselect(
@@ -781,12 +790,15 @@ with tab3:
         options=features,
         default=features,
         format_func=lambda x: VAR_SHORT[x],
-        key="ml_features",
+        key="ml_features_select",
     )
 
     if len(selected_features) >= 1:
-        # Usar datos del último año disponible o panel completo
-        use_panel = st.checkbox("Usar panel completo (todos los años)", value=True)
+        use_panel = st.checkbox(
+            "Usar panel completo (todos los anos)",
+            value=True,
+            key="ml_use_panel_checkbox",
+        )
         data_ml = df_f if use_panel else df_f[df_f["anio"] == latest_year]
         data_ml = data_ml.dropna(subset=[target] + selected_features)
 
@@ -796,15 +808,17 @@ with tab3:
         with st.spinner("Entrenando modelos..."):
             results = train_ml_models(X, y)
 
-        # Métricas
         metrics_df = pd.DataFrame({
             "Modelo": list(results.keys()),
-            "R²": [results[m]["r2"] for m in results],
+            "R2": [results[m]["r2"] for m in results],
             "RMSE": [results[m]["rmse"] for m in results],
-        }).sort_values("R²", ascending=False)
-        st.dataframe(metrics_df.style.format({"R²": "{:.3f}", "RMSE": "{:.2f}"}), use_container_width=True, hide_index=True)
+        }).sort_values("R2", ascending=False)
+        st.dataframe(
+            metrics_df.style.format({"R2": "{:.3f}", "RMSE": "{:.2f}"}),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        # Scatter Real vs Predicho
         best = metrics_df.iloc[0]["Modelo"]
         res_best = results[best]
         fig_sc = go.Figure()
@@ -816,21 +830,22 @@ with tab3:
         mn = min(res_best["y_test"].min(), res_best["y_pred"].min())
         mx = max(res_best["y_test"].max(), res_best["y_pred"].max())
         fig_sc.add_trace(go.Scatter(
-            x=[mn, mx], y=[mn, mx], mode="lines", name="Línea 1:1",
+            x=[mn, mx], y=[mn, mx], mode="lines", name="Linea 1:1",
             line=dict(dash="dash", color="#94a3b8"),
         ))
         fig_sc.update_layout(
-            title=f"Real vs Predicho — {best} (mejor R²)",
-            xaxis_title="Valor real", yaxis_title="Predicción",
+            title=f"Real vs Predicho — {best} (mejor R2)",
+            xaxis_title="Valor real", yaxis_title="Prediccion",
             height=400,
         )
         st.plotly_chart(fig_sc, use_container_width=True)
 
-        # Guardar mejor modelo en session_state para What-If
+        # Claves de session_state DISTINTAS a las keys de widgets
         st.session_state["ml_best_model"] = res_best["model"]
         st.session_state["ml_scaler"] = res_best["scaler"]
-        st.session_state["ml_features"] = res_best["feature_names"]
+        st.session_state["ml_features"] = list(res_best["feature_names"])
         st.session_state["ml_target"] = target
+        st.success(f"Modelo **{best}** guardado en sesion. Ya puedes usar PCA / Interpretabilidad / What-If.")
     else:
         st.info("Seleccione al menos una feature.")
 
@@ -838,10 +853,18 @@ with tab3:
 # TAB 4 · PCA
 # -----------------------------------------------------------------------------
 with tab4:
-    st.subheader("Reducción de Dimensionalidad — PCA")
-    st.markdown("Análisis de Componentes Principales sobre las 6 variables socioeconómicas (estandarizadas).")
+    st.subheader("Reduccion de Dimensionalidad — PCA")
+    st.markdown("Analisis de Componentes Principales sobre las 6 variables socioeconomicas (estandarizadas).")
 
-    year_pca = st.slider("Año para PCA", year_min, year_max, latest_year, key="pca_year")
+    if "ml_features" not in st.session_state:
+        st.info("Por favor entrena o selecciona un modelo en la pestana Machine Learning primero.")
+        st.stop()
+
+    year_pca = st.slider(
+        "Ano para PCA",
+        year_min, year_max, latest_year,
+        key="pca_year_slider",
+    )
     df_pca = df_f[df_f["anio"] == year_pca].dropna(subset=list(VAR_LABELS.keys()))
     X_pca = df_pca[list(VAR_LABELS.keys())]
     scaler_pca = StandardScaler()
@@ -852,7 +875,6 @@ with tab4:
     df_pca = df_pca.copy()
     df_pca["PC1"] = comps[:, 0]
     df_pca["PC2"] = comps[:, 1]
-
     var_exp = pca.explained_variance_ratio_
 
     c1, c2 = st.columns([1.3, 1])
@@ -860,7 +882,7 @@ with tab4:
         fig_pca = px.scatter(
             df_pca, x="PC1", y="PC2", text="departamento",
             color="pib", color_continuous_scale="Viridis",
-            title=f"Proyección PC1 vs PC2 · {year_pca}",
+            title=f"Proyeccion PC1 vs PC2 · {year_pca}",
             labels={"PC1": f"PC1 ({var_exp[0]*100:.1f}%)", "PC2": f"PC2 ({var_exp[1]*100:.1f}%)"},
         )
         fig_pca.update_traces(textposition="top center", textfont_size=9)
@@ -881,7 +903,6 @@ with tab4:
         )
         st.dataframe(loadings.style.format("{:.3f}"), use_container_width=True)
 
-        # Scree-like bar
         fig_var = px.bar(
             x=["PC1", "PC2"], y=var_exp * 100,
             labels={"x": "Componente", "y": "% Varianza"},
@@ -901,12 +922,16 @@ with tab5:
         "de la variable objetivo seleccionada."
     )
 
+    if "ml_features" not in st.session_state:
+        st.info("Por favor entrena o selecciona un modelo en la pestana Machine Learning primero.")
+        st.stop()
+
     target_fi = st.selectbox(
         "Variable a explicar",
         options=list(VAR_LABELS.keys()),
         format_func=lambda x: VAR_LABELS[x],
         index=3,
-        key="fi_target",
+        key="fi_target_select",
     )
     features_fi = [v for v in VAR_LABELS.keys() if v != target_fi]
 
@@ -932,92 +957,95 @@ with tab5:
         imp_df[["etiqueta", "importancia"]].rename(columns={"etiqueta": "Variable"}).style.format({"importancia": "{:.3f}"}),
         use_container_width=True, hide_index=True,
     )
-
     st.caption(
         f"Modelo: RandomForest (n_estimators=200, max_depth=8). "
-        f"R² in-sample: {rf_model.score(X_fi, y_fi):.3f}"
+        f"R2 in-sample: {rf_model.score(X_fi, y_fi):.3f}"
     )
 
 # -----------------------------------------------------------------------------
-# TAB 6 · SIMULACIÓN WHAT-IF
+# TAB 6 · SIMULACION WHAT-IF
 # -----------------------------------------------------------------------------
 with tab6:
-    st.subheader("Simulación de Política Pública — What-If")
+    st.subheader("Simulacion de Politica Publica — What-If")
     st.markdown(
-        "Simule un choque porcentual en la **Inversión Pública DNP** y observe el efecto "
+        "Simule un choque porcentual en la **Inversion Publica DNP** y observe el efecto "
         "estimado sobre la variable objetivo mediante el mejor modelo ML entrenado."
     )
 
-    if "ml_best_model" not in st.session_state:
-        st.warning("Primero entrene un modelo en la pestaña **Machine Learning** para habilitar la simulación.")
-    else:
-        model = st.session_state["ml_best_model"]
-        scaler = st.session_state["ml_scaler"]
-        feat_names = st.session_state["ml_features"]
-        tgt = st.session_state["ml_target"]
+    if "ml_features" not in st.session_state:
+        st.info("Por favor entrena o selecciona un modelo en la pestana Machine Learning primero.")
+        st.stop()
 
-        st.info(f"Modelo activo: mejor del último entrenamiento · Objetivo: **{VAR_SHORT[tgt]}** · Features: {', '.join([VAR_SHORT[f] for f in feat_names])}")
+    if "ml_best_model" not in st.session_state or "ml_scaler" not in st.session_state:
+        st.warning("Primero entrene un modelo en la pestana **Machine Learning** para habilitar la simulacion.")
+        st.stop()
 
-        shock_pct = st.slider(
-            "Incremento % en Inversión DNP (choque presupuestal)",
-            min_value=-30, max_value=50, value=10, step=5,
+    model = st.session_state["ml_best_model"]
+    scaler = st.session_state["ml_scaler"]
+    feat_names = st.session_state["ml_features"]
+    tgt = st.session_state["ml_target"]
+
+    st.info(
+        f"Modelo activo: mejor del ultimo entrenamiento · Objetivo: **{VAR_SHORT[tgt]}** · "
+        f"Features: {', '.join([VAR_SHORT[f] for f in feat_names])}"
+    )
+
+    shock_pct = st.slider(
+        "Incremento % en Inversion DNP (choque presupuestal)",
+        min_value=-30, max_value=50, value=10, step=5,
+        key="whatif_shock_slider",
+    )
+
+    base = df_f[df_f["anio"] == latest_year][feat_names].mean().to_frame().T
+    base = base.reindex(columns=feat_names)
+
+    scenario = base.copy()
+    if "inversion_dnp" in feat_names:
+        scenario["inversion_dnp"] = scenario["inversion_dnp"] * (1 + shock_pct / 100)
+
+    X_base = scaler.transform(base)
+    X_scen = scaler.transform(scenario)
+    pred_base = float(model.predict(X_base)[0])
+    pred_scen = float(model.predict(X_scen)[0])
+    delta = pred_scen - pred_base
+    delta_pct = (delta / pred_base * 100) if pred_base != 0 else 0.0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"{VAR_SHORT[tgt]} baseline", f"{pred_base:.2f}")
+    c2.metric(f"{VAR_SHORT[tgt]} con choque", f"{pred_scen:.2f}", delta=f"{delta:+.2f}")
+    c3.metric("Variacion relativa", f"{delta_pct:+.1f}%")
+
+    fig_wh = go.Figure()
+    fig_wh.add_trace(go.Bar(
+        x=["Baseline", f"Choque {shock_pct:+d}% Inv. DNP"],
+        y=[pred_base, pred_scen],
+        marker_color=["#64748b", "#0f766e"],
+        text=[f"{pred_base:.2f}", f"{pred_scen:.2f}"],
+        textposition="auto",
+    ))
+    fig_wh.update_layout(
+        title=f"Efecto estimado del choque presupuestal sobre {VAR_SHORT[tgt]}",
+        yaxis_title=VAR_SHORT[tgt], height=360,
+    )
+    st.plotly_chart(fig_wh, use_container_width=True)
+
+    with st.expander("Detalles tecnicos del escenario"):
+        st.write("**Vector de features baseline:**")
+        st.dataframe(base.style.format("{:.1f}"), hide_index=True)
+        st.write("**Vector de features con choque:**")
+        st.dataframe(scenario.style.format("{:.1f}"), hide_index=True)
+        st.caption(
+            "Se respeta estrictamente el orden y nombres de columnas del entrenamiento "
+            "(feature_names_in_ / columnas de fit) para evitar ValueError de scikit-learn."
         )
-
-        # Base: promedio del último año
-        base = df_f[df_f["anio"] == latest_year][feat_names].mean().to_frame().T
-        # Strict feature names control
-        base = base.reindex(columns=feat_names)
-
-        # Escenario con shock
-        scenario = base.copy()
-        if "inversion_dnp" in feat_names:
-            scenario["inversion_dnp"] = scenario["inversion_dnp"] * (1 + shock_pct / 100)
-
-        # Predicciones
-        X_base = scaler.transform(base)
-        X_scen = scaler.transform(scenario)
-        pred_base = model.predict(X_base)[0]
-        pred_scen = model.predict(X_scen)[0]
-        delta = pred_scen - pred_base
-        delta_pct = (delta / pred_base * 100) if pred_base != 0 else 0
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric(f"{VAR_SHORT[tgt]} baseline", f"{pred_base:.2f}")
-        c2.metric(f"{VAR_SHORT[tgt]} con choque", f"{pred_scen:.2f}", delta=f"{delta:+.2f}")
-        c3.metric("Variación relativa", f"{delta_pct:+.1f}%")
-
-        # Comparación visual
-        fig_wh = go.Figure()
-        fig_wh.add_trace(go.Bar(
-            x=["Baseline", f"Choque {shock_pct:+d}% Inv. DNP"],
-            y=[pred_base, pred_scen],
-            marker_color=["#64748b", "#0f766e"],
-            text=[f"{pred_base:.2f}", f"{pred_scen:.2f}"],
-            textposition="auto",
-        ))
-        fig_wh.update_layout(
-            title=f"Efecto estimado del choque presupuestal sobre {VAR_SHORT[tgt]}",
-            yaxis_title=VAR_SHORT[tgt], height=360,
-        )
-        st.plotly_chart(fig_wh, use_container_width=True)
-
-        with st.expander("Detalles técnicos del escenario"):
-            st.write("**Vector de features baseline:**")
-            st.dataframe(base.style.format("{:.1f}"), hide_index=True)
-            st.write("**Vector de features con choque:**")
-            st.dataframe(scenario.style.format("{:.1f}"), hide_index=True)
-            st.caption(
-                "Se respeta estrictamente el orden y nombres de columnas del entrenamiento "
-                "(`feature_names_in_` / columnas de `fit`) para evitar ValueError de scikit-learn."
-            )
 
 # =============================================================================
 # FOOTER
 # =============================================================================
 st.markdown("---")
 st.caption(
-    "Observatorio de Analítica Económica y Social por Departamentos en Colombia · "
-    "Datos sintéticos calibrados con rangos y tendencias 2010–2024 · "
-    "En producción: conectar endpoints DANE / TerriData DNP. "
-    "Metodología: ADF · Johansen · VAR/VECM · Ridge/Lasso/SVR/MLP · PCA · Random Forest."
+    "Observatorio de Analitica Economica y Social por Departamentos en Colombia · "
+    "Datos sinteticos calibrados con rangos y tendencias 2010-2024 · "
+    "En produccion: conectar endpoints DANE / TerriData DNP. "
+    "Metodologia: ADF · Johansen · VAR/VECM · Ridge/Lasso/SVR/MLP · PCA · Random Forest."
 )
